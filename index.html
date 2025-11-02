@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<!-- 声明文档类型为HTML5，确保浏览器以标准模式渲染页面 -->
+<html>
+<head>
+    <!-- 设置字符编码为UTF-8，支持中文及多语言字符 -->
+    <meta charset="UTF-8">
+    <!-- 设置视口，确保在移动设备上正确缩放和显示 -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <!-- 页面标题，显示在浏览器标签页上 -->
+    <title>index</title>
+    <style>
+    </style>
+</head>
+<body>
+    <h4>请输入你的api请求地址</h4>
+    <input type="text" id="apiUrl" placeholder="请输入api地址">
+    <h4>请输入你的api_key</h4>
+    <input type="text" id="apiKey" placeholder="请输入api_key">
+    <h4>请输入目标请求模型</h4>
+    <input type="text" id="model" placeholder="请输入目标模型">
+    <button onclick="saveConfig()">保存配置</button>
+    <p id="status"></p>
+
+    <input type="text" id="userInput" placeholder="请输入你的问题">
+    <button onclick="sendRequest()">发送请求</button>
+    <p id="response"></p>
+
+    <script>
+        function saveConfig() {
+            const status = document.getElementById('status');
+            const apiUrl = document.getElementById('apiUrl').value;
+            const apiKey = document.getElementById('apiKey').value;
+            const model = document.getElementById('model').value;
+
+            if (!apiUrl || !apiKey || !model) {
+                status.textContent = '请填写完整配置';
+                return;
+            }
+
+            // 保存配置到本地存储
+            localStorage.setItem('apiUrl', apiUrl);
+            localStorage.setItem('apiKey', apiKey);
+            localStorage.setItem('model', model);
+
+            status.textContent = '配置已保存';
+        }
+        async function sendRequest() {
+            const userInput = document.getElementById('userInput').value;
+            const response = document.getElementById('response');
+            if (!userInput || !localStorage.getItem('apiUrl') || !localStorage.getItem('apiKey') || !localStorage.getItem('model')) {
+                response.textContent = '请填写完整配置/问题';
+                return;
+            }
+            response.textContent = '正在判断请求...';
+            try {
+                router_response = await fetch('/router', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        text: userInput
+                    })
+                });
+                if (!router_response.ok) {
+                    response.textContent = '路由判断失败';
+                    return;
+                }
+                const router_data = await router_response.json();
+                response.textContent = '请求分类为：' + router_data.label;
+                let thinking_budget = 0;
+                if (router_data.label === 'thinking') {
+                    thinking_budget = 800;
+                } else {
+                    thinking_budget = 0;
+                }
+
+                // const ai_response = await fetch('/ai', {
+                //     method: 'POST',
+                //     headers: {
+                //         'Content-Type': 'application/json'
+                //     },
+                //     body: JSON.stringify({
+                //         apiurl: localStorage.getItem('apiUrl'),
+                //         apikey: localStorage.getItem('apiKey'),
+                //         model: localStorage.getItem('model'),
+                //         thinking_budget: thinking_budget,
+                //         query: userInput
+                //     })
+                // });
+                // if (!ai_response.ok) {
+                //     response.textContent = 'api请求失败';
+                //     return;
+                // }
+                // const ai_data = await ai_response.json();
+                // response.textContent = '<think>' + ai_data.think_text + '</think>' + ai_data.text;
+            } catch (error) {
+                console.error('Error:', error);
+                response.textContent = "请求失败，请稍后再试。";
+            }
+        }
+    </script>
+</body>
+</html>
