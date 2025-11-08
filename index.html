@@ -21,34 +21,96 @@
     <button onclick="saveConfig()">保存配置</button>
     <p id="status"></p>
 
+
+    <h4>请输入模型名称以查询配置</h4>
+    <input type="text" id="model_name" placeholder="请输入模型名称">
+    <button onclick="queryConfig()">查询</button>
+    <p id="model_config"></p>
+
     <input type="text" id="userInput" placeholder="请输入你的问题">
     <button onclick="sendRequest()">发送请求</button>
     <p id="response"></p>
 
+
     <script>
-        function saveConfig() {
+        async function saveConfig() {
             const status = document.getElementById('status');
             const apiUrl = document.getElementById('apiUrl').value;
             const apiKey = document.getElementById('apiKey').value;
             const model = document.getElementById('model').value;
 
-            if (!apiUrl || !apiKey || !model) {
+            if (!apiKey || !model) {
                 status.textContent = '请填写完整配置';
                 return;
             }
 
-            // 保存配置到本地存储
-            localStorage.setItem('apiUrl', apiUrl);
-            localStorage.setItem('apiKey', apiKey);
-            localStorage.setItem('model', model);
+            try {
+                const response = await fetch('/admin/config', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        action: "add",
+                        provider: 'gemini',
+                        apiurl: apiUrl,
+                        apikey: apiKey,
+                        model_name: model,
+                        name: model
+                    })
+                });
+                if (!response.ok) {
+                    status.textContent = '保存配置失败,' + response.statusText;
+                    return;
+                }
+            } catch (error) {
+                status.textContent = '保存配置失败,' + error.message;
+                return;
+            }
 
             status.textContent = '配置已保存';
+        }
+        async function queryConfig() {
+            const model_name = document.getElementById('model_name').value;
+            const model_config = document.getElementById('model_config');
+            if (!model_name) {
+                model_config.textContent = '请填写模型名称';
+                return;
+            }
+            try {
+                const response = await fetch('/admin/config', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        action: "query"
+                    })
+                });
+                if (!response.ok) {
+                    model_config.textContent = '查询配置失败,' + response.statusText;
+                    return;
+                }
+                const data = await response.json();
+                // 查找与用户输入的model_name相匹配的配置项
+                let foundApiUrl = '未找到对应模型的配置';
+                if (data.success && data.data && Array.isArray(data.data)) {
+                    const matchedConfig = data.data.find(config => config.model_name === model_name);
+                    if (matchedConfig && matchedConfig.apiurl) {
+                        foundApiUrl = matchedConfig.apiurl;
+                    }
+                }
+                model_config.textContent = '查询配置成功,' + JSON.stringify(data) + ',已选择模型' + model_name + '(模型对应url:' + foundApiUrl + ')';
+            } catch (error) {
+                model_config.textContent = '查询配置失败,' + error.message;
+                return;
+            }
         }
         async function sendRequest() {
             const userInput = document.getElementById('userInput').value;
             const response = document.getElementById('response');
-            if (!userInput || !localStorage.getItem('apiUrl') || !localStorage.getItem('apiKey') || !localStorage.getItem('model')) {
-                response.textContent = '请填写完整配置/问题';
+            if (!userInput) {
+                response.textContent = '请填写完整问题';
                 return;
             }
             response.textContent = '正在判断请求...';
@@ -75,28 +137,26 @@
                     thinking_budget = 0;
                 }
 
-                // const ai_response = await fetch('/ai', {
-                //     method: 'POST',
-                //     headers: {
-                //         'Content-Type': 'application/json'
-                //     },
-                //     body: JSON.stringify({
-                //         apiurl: localStorage.getItem('apiUrl'),
-                //         apikey: localStorage.getItem('apiKey'),
-                //         model: localStorage.getItem('model'),
-                //         thinking_budget: thinking_budget,
-                //         query: userInput
-                //     })
-                // });
-                // if (!ai_response.ok) {
-                //     response.textContent = 'api请求失败';
-                //     return;
-                // }
-                // const ai_data = await ai_response.json();
-                // response.textContent = '<think>' + ai_data.think_text + '</think>' + ai_data.text;
+                const ai_response = await fetch('/ai', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        name: document.getElementById('model_name').value,
+                        thinking_budget: thinking_budget,
+                        query: userInput
+                    })
+                });
+                if (!ai_response.ok) {
+                    response.textContent = 'api请求失败';
+                    return;
+                }
+                const ai_data = await ai_response.json();
+                response.textContent = '<think>' + ai_data.think_text + '</think>' + ai_data.text;
             } catch (error) {
                 console.error('Error:', error);
-                response.textContent = "请求失败，请稍后再试。";
+                response.textContent = "请求失败，请稍后再试。" + error;
             }
         }
     </script>

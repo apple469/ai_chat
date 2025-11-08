@@ -179,11 +179,10 @@ class ClassifyResponse(BaseModel):
     confidence: float
 
 class AIResponseRequest(BaseModel):
-    apiurl : str
-    apikey: str
-    model: str
+    name: str
     thinking_budget: int
     query: str
+    # ...
 
 class AIResponseResponse(BaseModel):
     think_text: str
@@ -197,6 +196,11 @@ class API_action(BaseModel):
     action: str # 只允许传入 "add" 或 "delete" 或 "query"
     name: str | None = None # 模型别名，用于添加和删除
 
+class APIConfigResponse(BaseModel):
+    success: bool
+    message: str
+    data: list | dict | None = None
+
 # 创建FastAPI应用实例
 app = FastAPI(title="AI Text Classification API", version="1.0.0")
 
@@ -207,6 +211,8 @@ try:
 except Exception as e:
     print(f"Failed to read api_config.json: {e}")
     api_config = []
+    with open("api_config.json", "w", encoding="utf-8") as f:
+        json.dump(api_config, f, ensure_ascii=False, indent=2)
 
 # 分类标签定义
 requires_reasoning = [
@@ -224,34 +230,32 @@ requires_reasoning = [
     {"text": "今天天气怎么样", "label": "non-thinking"}
 ]
 
-@app.post("/admin/config")
+@app.post("/admin/config", response_model=APIConfigResponse)
 async def config_endpoint(request: API_action):
     global api_config
     try:
         if request.action == "add":
-            if not request.apiurl or not request.provider or not request.model_name:
-                raise HTTPException(status_code=400, detail="apiurl, apikey, and model_name are required for add action")
+            if not request.apiurl or not request.provider or not request.model_name or not request.name:
+                raise HTTPException(status_code=400, detail="apiurl, provider, model_name, and name are required for add action")
             else:
-                if not any(item["name"] == request.name for item in api_config):
-                    # 创建新配置对象，只包含非空的字段
-                    new_config = {}
-                    if request.provider is not None:
-                        new_config["provider"] = request.provider
-                    if request.apiurl is not None:
-                        new_config["apiurl"] = request.apiurl
-                    if request.apikey is not None:
-                        new_config["apikey"] = request.apikey
-                    if request.model_name is not None:
-                        new_config["model_name"] = request.model_name
-                    if request.name is not None:
-                        new_config["name"] = request.name
-                    
-                    # 将新配置追加到全局 api_config 列表
-                    api_config.append(new_config)
-                    with open("api_config.json", "w", encoding="utf-8") as f:
-                        json.dump(api_config, f, ensure_ascii=False, indent=2)
-                else:
-                    raise HTTPException(status_code=400, detail="Duplicate name!")
+                # 创建新配置对象，只包含非空的字段
+                new_config = {}
+                if request.provider is not None:
+                    new_config["provider"] = request.provider
+                if request.apiurl is not None:
+                    new_config["apiurl"] = request.apiurl     
+                if request.apikey is not None:
+                    new_config["apikey"] = request.apikey
+                if request.model_name is not None:
+                    new_config["model_name"] = request.model_name
+                if request.name is not None:
+                    new_config["name"] = request.name
+                
+                # 将新配置追加到全局 api_config 列表
+                api_config.append(new_config)
+                with open("api_config.json", "w", encoding="utf-8") as f:
+                    json.dump(api_config, f, ensure_ascii=False, indent=2)
+                return APIConfigResponse(success=True, message="Configuration added successfully")
         elif request.action == "delete":
             if not request.name:
                 raise HTTPException(status_code=400, detail="name is required for delete action")
@@ -260,11 +264,12 @@ async def config_endpoint(request: API_action):
                     api_config = [item for item in api_config if item["name"] != request.name]
                     with open("api_config.json", "w", encoding="utf-8") as f:
                         json.dump(api_config, f, ensure_ascii=False, indent=2)
+                    return APIConfigResponse(success=True, message="Configuration deleted successfully")
                 else:
                     raise HTTPException(status_code=400, detail="name not found!")
         elif request.action == "query":
             cleaned_config = [{k: v for k, v in item.items() if k != "apikey"} for item in api_config]
-            return cleaned_config
+            return APIConfigResponse(success=True, message="Query successful", data=cleaned_config)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"error: {str(e)}")
 
@@ -284,17 +289,23 @@ async def ai_response_endpoint(request: AIResponseRequest):
     """
     对输入文本进行AI响应
     """
+
+    # google gemini 模型
     try:
         from google import genai
         from google.genai import types
         
+        apikey = next((item["apikey"] for item in api_config if item.get("name") == request.name), None)
+        model_name = next((item["model_name"] for item in api_config if item.get("name") == request.name), None)
+        if apikey is None:
+            raise HTTPException(status_code=404, detail=f"未找到名为 '{request.name}' 的模型配置")
 
         client = genai.Client(
-            api_key=request.apikey
+            api_key=apikey
         )
 
         response = client.models.generate_content(
-        model=request.model,
+        model=model_name,
         contents=request.query,
         config=types.GenerateContentConfig(
             thinking_config=types.ThinkingConfig(
