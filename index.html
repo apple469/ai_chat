@@ -74,7 +74,6 @@
         }
         async function add_model() {
             const model_name_select = document.getElementById('model_name');
-            // 清除除了第一个“请选择”选项之外的所有现有选项
             while (model_name_select.children.length > 1) {
                 model_name_select.removeChild(model_name_select.lastChild);
             }
