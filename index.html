@@ -1,34 +1,36 @@
 <!DOCTYPE html>
-<!-- 声明文档类型为HTML5，确保浏览器以标准模式渲染页面 -->
+<!-- Declare the document type as HTML5 to ensure the browser renders the page in standards mode -->
 <html>
 <head>
-    <!-- 设置字符编码为UTF-8，支持中文及多语言字符 -->
+    <!-- Set the character encoding to UTF-8 to support multiple languages -->
     <meta charset="UTF-8">
-    <!-- 设置视口，确保在移动设备上正确缩放和显示 -->
+    <!-- Set the viewport to ensure proper scaling and display on mobile devices -->
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <!-- 页面标题，显示在浏览器标签页上 -->
-    <title>index</title>
+    <!-- Page title displayed on the browser tab -->
+    <title>Index</title>
     <style>
     </style>
 </head>
 <body>
-    <h4>请输入你的api请求地址</h4>
-    <input type="text" id="apiUrl" placeholder="请输入api地址">
-    <h4>请输入你的api_key</h4>
-    <input type="text" id="apiKey" placeholder="请输入api_key">
-    <h4>请输入目标请求模型</h4>
-    <input type="text" id="model" placeholder="请输入目标模型">
-    <button onclick="saveConfig()">保存配置</button>
+    <h4>Please enter your API request URL</h4>
+    <input type="text" id="apiUrl" placeholder="Enter API URL">
+    <h4>Please enter your API key</h4>
+    <input type="text" id="apiKey" placeholder="Enter API key">
+    <h4>Please enter the target model</h4>
+    <input type="text" id="model" placeholder="Enter target model">
+    <button onclick="saveConfig()">Save Configuration</button>
     <p id="status"></p>
 
 
-    <h4>请输入模型名称以查询配置</h4>
-    <input type="text" id="model_name" placeholder="请输入模型名称">
-    <button onclick="queryConfig()">查询</button>
-    <p id="model_config"></p>
+    <h4>Please select a model</h4>
+    <label for="model_name">Model Name:</label>
+    <select id="model_name">
+        <option value="">please select</option>
+    </select>
+    <button onclick="add_model()">Refresh</button>
 
-    <input type="text" id="userInput" placeholder="请输入你的问题">
-    <button onclick="sendRequest()">发送请求</button>
+    <input type="text" id="userInput" placeholder="Enter your question">
+    <button onclick="sendRequest()">Send Request</button>
     <p id="response"></p>
 
 
@@ -40,7 +42,7 @@
             const model = document.getElementById('model').value;
 
             if (!apiKey || !model) {
-                status.textContent = '请填写完整配置';
+                status.textContent = 'Please complete the configuration';
                 return;
             }
 
@@ -60,23 +62,23 @@
                     })
                 });
                 if (!response.ok) {
-                    status.textContent = '保存配置失败,' + response.statusText;
+                    status.textContent = 'Failed to save configuration, ' + response.statusText;
                     return;
                 }
             } catch (error) {
-                status.textContent = '保存配置失败,' + error.message;
+                status.textContent = 'Failed to save configuration, ' + error.message;
                 return;
             }
 
-            status.textContent = '配置已保存';
+            status.textContent = 'Configuration saved';
         }
-        async function queryConfig() {
-            const model_name = document.getElementById('model_name').value;
-            const model_config = document.getElementById('model_config');
-            if (!model_name) {
-                model_config.textContent = '请填写模型名称';
-                return;
+        async function add_model() {
+            const model_name_select = document.getElementById('model_name');
+            // 清除除了第一个“请选择”选项之外的所有现有选项
+            while (model_name_select.children.length > 1) {
+                model_name_select.removeChild(model_name_select.lastChild);
             }
+
             try {
                 const response = await fetch('/admin/config', {
                     method: 'POST',
@@ -88,21 +90,28 @@
                     })
                 });
                 if (!response.ok) {
-                    model_config.textContent = '查询配置失败,' + response.statusText;
+                    model_config.textContent = 'Failed to query configuration, ' + response.statusText;
                     return;
                 }
                 const data = await response.json();
-                // 查找与用户输入的model_name相匹配的配置项
-                let foundApiUrl = '未找到对应模型的配置';
                 if (data.success && data.data && Array.isArray(data.data)) {
-                    const matchedConfig = data.data.find(config => config.model_name === model_name);
+                    data.data.forEach(config => {
+                        const option = document.createElement('option');
+                        option.value = config.name;
+                        option.textContent = config.name;
+                        model_name_select.appendChild(option);
+                    });
+                }
+                // Find the configuration item matching the user input model_name
+                let foundApiUrl = 'No configuration found for the specified model';
+                if (data.success && data.data && Array.isArray(data.data)) {
+                    const matchedConfig = data.data.find(config => config.model_name === model_name_select.value);
                     if (matchedConfig && matchedConfig.apiurl) {
                         foundApiUrl = matchedConfig.apiurl;
                     }
                 }
-                model_config.textContent = '查询配置成功,' + JSON.stringify(data) + ',已选择模型' + model_name + '(模型对应url:' + foundApiUrl + ')';
             } catch (error) {
-                model_config.textContent = '查询配置失败,' + error.message;
+                model_config.textContent = 'Failed to query configuration, ' + error.message;
                 return;
             }
         }
@@ -110,10 +119,10 @@
             const userInput = document.getElementById('userInput').value;
             const response = document.getElementById('response');
             if (!userInput) {
-                response.textContent = '请填写完整问题';
+                response.textContent = 'Please complete your question';
                 return;
             }
-            response.textContent = '正在判断请求...';
+            response.textContent = 'Determining request...';
             try {
                 router_response = await fetch('/router', {
                     method: 'POST',
@@ -125,11 +134,11 @@
                     })
                 });
                 if (!router_response.ok) {
-                    response.textContent = '路由判断失败';
+                    response.textContent = 'Routing failed';
                     return;
                 }
                 const router_data = await router_response.json();
-                response.textContent = '请求分类为：' + router_data.label;
+                response.textContent = 'Request classified as: ' + router_data.label;
                 let thinking_budget = 0;
                 if (router_data.label === 'thinking') {
                     thinking_budget = 800;
@@ -149,14 +158,14 @@
                     })
                 });
                 if (!ai_response.ok) {
-                    response.textContent = 'api请求失败';
+                    response.textContent = 'API request failed';
                     return;
                 }
                 const ai_data = await ai_response.json();
                 response.textContent = '<think>' + ai_data.think_text + '</think>' + ai_data.text;
             } catch (error) {
                 console.error('Error:', error);
-                response.textContent = "请求失败，请稍后再试。";
+                response.textContent = "Request failed, please try again later.";
             }
         }
     </script>
