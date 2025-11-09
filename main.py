@@ -9,23 +9,23 @@ import uvicorn
 import json
 
 
-# --- 配置 ---
-# 获取脚本所在目录的绝对路径
+# --- Configuration ---
+# Get the absolute path of the script directory
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-# ONNX模型和tokenizer文件所在的目录
+# Directory for ONNX model and tokenizer files
 ONNX_MODEL_DIR = os.path.join(SCRIPT_DIR, "onnx_models")
 ONNX_MODEL_PATH = os.path.join(ONNX_MODEL_DIR, "model.onnx")
 TOKENIZER_VOCAB_PATH = os.path.join(ONNX_MODEL_DIR, "vocab.txt")
 
 
 class ONNXSentenceEncoder:
-    """ONNX模型和tokenizer封装类"""
+    """ONNX Model and Tokenizer Wrapper Class"""
     def __init__(self, model_path, vocab_path, max_seq_len=128):
         """
-        初始化ONNX模型和tokenizer
-        :param model_path: ONNX模型文件路径
-        :param vocab_path: 词汇表文件路径
-        :param max_seq_len: 最大序列长度
+        Initializes ONNX model and tokenizer
+        :param model_path: Path to the ONNX model file
+        :param vocab_path: Path to the vocabulary file
+        :param max_seq_len: Maximum sequence length
         """
         self.session = onnxruntime.InferenceSession(model_path, providers=['CPUExecutionProvider'])
         self.tokenizer = BertWordPieceTokenizer(
@@ -36,13 +36,13 @@ class ONNXSentenceEncoder:
         self.input_names = [inp.name for inp in self.session.get_inputs()]
 
     def _tokenize(self, text):
-        """对文本进行tokenization"""
+        """Tokenizes the input text"""
         encoded = self.tokenizer.encode(text)
         input_ids = encoded.ids
         attention_mask = encoded.attention_mask
         token_type_ids = encoded.type_ids
 
-        # 裁剪或填充到 max_seq_len
+        # Truncate or pad to max_seq_len
         if len(input_ids) > self.max_seq_len:
             input_ids = input_ids[:self.max_seq_len]
             attention_mask = attention_mask[:self.max_seq_len]
@@ -58,7 +58,7 @@ class ONNXSentenceEncoder:
                np.array([token_type_ids], dtype=np.int64)
 
     def encode(self, texts):
-        """将文本列表编码为嵌入向量"""
+        """Encodes a list of texts into embedding vectors"""
         if isinstance(texts, str):
             texts = [texts]
 
@@ -66,7 +66,7 @@ class ONNXSentenceEncoder:
         for text in texts:
             input_ids, attention_mask, token_type_ids = self._tokenize(text)
             
-            # 准备输入字典，确保与ONNX模型输入名称匹配
+            # Prepare input dictionary, ensuring it matches ONNX model input names
             inputs = {}
             if "input_ids" in self.input_names:
                 inputs["input_ids"] = input_ids
@@ -77,63 +77,63 @@ class ONNXSentenceEncoder:
 
             outputs = self.session.run(None, inputs)
             
-            # Sentence-BERT通常输出last_hidden_state，然后池化
+            # Sentence-BERT typically outputs last_hidden_state, then pools
             last_hidden_state = outputs[0]
             
-            # 平均池化，并考虑到attention_mask
+            # Average pooling, considering attention_mask
             input_mask_expanded = np.expand_dims(attention_mask, axis=-1).astype(float)
             sum_embeddings = np.sum(last_hidden_state * input_mask_expanded, axis=1)
             sum_mask = np.clip(input_mask_expanded.sum(axis=1), a_min=1e-9, a_max=None)
             sentence_embedding = sum_embeddings / sum_mask
             
-            # 归一化嵌入向量 (L2范数)
+            # Normalize embedding vectors (L2 norm)
             sentence_embedding = sentence_embedding / np.linalg.norm(sentence_embedding, axis=1, keepdims=True)
             embeddings.append(sentence_embedding[0])
         
         return np.array(embeddings)
 
 
-# --- 核心优化：全局初始化模型（仅加载一次）---
-# 程序启动时就完成模型和Tokenizer的加载，后续分类直接复用
+# --- Core Optimization: Global model initialization (loaded only once) ---
+# Model and Tokenizer are loaded at program startup, subsequent classifications reuse them
 try:
     global_encoder = ONNXSentenceEncoder(ONNX_MODEL_PATH, TOKENIZER_VOCAB_PATH)
-    print("分类模型初始化成功")
+    print("Classification model initialized successfully")
 except Exception as e:
-    print(f"模型初始化失败：{str(e)}")
-    print("请检查 onnx_models 目录下是否存在 model.onnx 和 vocab.txt 文件")
+    print(f"Model initialization failed: {str(e)}")
+    print("Please check if model.onnx and vocab.txt exist in the onnx_models directory")
     exit(1)
 
 
 def cosine_similarity(vec1, vec2):
     """
-    计算两个向量之间的余弦相似度
-    :param vec1: 向量1
-    :param vec2: 向量2
-    :return: 余弦相似度
+    Calculates the cosine similarity between two vectors
+    :param vec1: Vector 1
+    :param vec2: Vector 2
+    :return: Cosine similarity
     """
     return np.dot(vec1, vec2) / (np.linalg.norm(vec1) * np.linalg.norm(vec2))
 
 
-# 添加缓存来存储原型句子的嵌入向量
+# Add cache to store prototype sentence embeddings
 from collections import OrderedDict
-# 使用OrderedDict来维护缓存顺序，并限制最大大小为100
+# Use OrderedDict to maintain cache order and limit max size to 100
 prototype_embeddings_cache = OrderedDict()
 MAX_CACHE_SIZE = 100
 
 def classify_text(text, prototypes):
     """
-    根据原型句子对文本进行分类（复用全局模型实例）
-    :param text: 需要分类的文本
-    :param prototypes: 原型句子列表，格式为 [{"text": "示例文本", "label": "标签"}, ...]
-    :return: (最优标签, 置信度)
+    Classifies text based on prototype sentences (reusing global model instance)
+    :param text: Text to be classified
+    :param prototypes: List of prototype sentences, format: [{"text": "sample text", "label": "label"}, ...]
+    :return: (best label, confidence)
     """
-    # 直接使用全局初始化好的 encoder，不再重复创建
+    # Directly use the globally initialized encoder, no need to recreate
     encoder = global_encoder
     
-    # 编码待分类文本
+    # Encode text to be classified
     text_embedding = encoder.encode(text)[0]
     
-    # 按标签分组原型句子
+    # Group prototype sentences by label
     label_groups = {}
     for prototype in prototypes:
         label = prototype["label"]
@@ -141,26 +141,26 @@ def classify_text(text, prototypes):
             label_groups[label] = []
         label_groups[label].append(prototype["text"])
     
-    # 计算每个标签组的平均相似度
+    # Calculate average similarity for each label group
     label_similarities = {}
     for label, texts in label_groups.items():
-        # 使用缓存避免重复计算原型句子的嵌入向量
-        cache_key = tuple(texts)  # 使用文本元组作为缓存键
+        # Use cache to avoid recomputing prototype sentence embeddings
+        cache_key = tuple(texts)  # Use text tuple as cache key
         if cache_key in prototype_embeddings_cache:
-            # 当访问已存在的缓存项时，将其移到最后（最近使用）
+            # When accessing an existing cache item, move it to the end (most recently used)
             embeddings = prototype_embeddings_cache.pop(cache_key)
             prototype_embeddings_cache[cache_key] = embeddings
         else:
             embeddings = encoder.encode(texts)
-            # 检查缓存大小，如果超过限制则删除最早添加的条目
+            # Check cache size, remove oldest entry if limit exceeded
             if len(prototype_embeddings_cache) >= MAX_CACHE_SIZE:
                 prototype_embeddings_cache.popitem(last=False)
-            prototype_embeddings_cache[cache_key] = embeddings  # 缓存结果
+            prototype_embeddings_cache[cache_key] = embeddings  # Cache result
             
         similarities = [cosine_similarity(text_embedding, emb) for emb in embeddings]
         label_similarities[label] = np.mean(similarities)
     
-    # 返回具有最高平均相似度的标签和置信度
+    # Return the label with the highest average similarity and confidence
     if not label_similarities:
         return None, 0.0
     
@@ -170,7 +170,7 @@ def classify_text(text, prototypes):
     return best_label, confidence
 
 
-# 定义请求和响应模型
+# Define request and response models
 class ClassifyRequest(BaseModel):
     text: str
 
@@ -179,25 +179,29 @@ class ClassifyResponse(BaseModel):
     confidence: float
 
 class AIResponseRequest(BaseModel):
-    apiurl : str
-    apikey: str
-    model: str
+    name: str
     thinking_budget: int
     query: str
+    # ...
 
 class AIResponseResponse(BaseModel):
     think_text: str
     text: str
 
 class API_action(BaseModel):
-    provider: str | None = None # 模型提供商，如 "openai"
+    provider: str | None = None # Model provider, e.g., "openai"
     apiurl : str | None = None
     apikey: str | None = None
     model_name: str | None = None
-    action: str # 只允许传入 "add" 或 "delete" 或 "query"
-    name: str | None = None # 模型别名，用于添加和删除
+    action: str # Only "add", "delete", or "query" allowed
+    name: str | None = None # Model alias, used for adding and deleting
 
-# 创建FastAPI应用实例
+class APIConfigResponse(BaseModel):
+    success: bool
+    message: str
+    data: list | dict | None = None
+
+# Create FastAPI application instance
 app = FastAPI(title="AI Text Classification API", version="1.0.0")
 
 import json
@@ -207,8 +211,10 @@ try:
 except Exception as e:
     print(f"Failed to read api_config.json: {e}")
     api_config = []
+    with open("api_config.json", "w", encoding="utf-8") as f:
+        json.dump(api_config, f, ensure_ascii=False, indent=2)
 
-# 分类标签定义
+# Classification label definitions
 requires_reasoning = [
     {"text": "please thinking", "label": "thinking"},
     {"text": "please non-thinking", "label": "non-thinking"},
@@ -224,34 +230,32 @@ requires_reasoning = [
     {"text": "今天天气怎么样", "label": "non-thinking"}
 ]
 
-@app.post("/admin/config")
+@app.post("/admin/config", response_model=APIConfigResponse)
 async def config_endpoint(request: API_action):
     global api_config
     try:
         if request.action == "add":
-            if not request.apiurl or not request.provider or not request.model_name:
-                raise HTTPException(status_code=400, detail="apiurl, apikey, and model_name are required for add action")
+            if not request.apiurl or not request.provider or not request.model_name or not request.name:
+                raise HTTPException(status_code=400, detail="apiurl, provider, model_name, and name are required for add action")
             else:
-                if not any(item["name"] == request.name for item in api_config):
-                    # 创建新配置对象，只包含非空的字段
-                    new_config = {}
-                    if request.provider is not None:
-                        new_config["provider"] = request.provider
-                    if request.apiurl is not None:
-                        new_config["apiurl"] = request.apiurl
-                    if request.apikey is not None:
-                        new_config["apikey"] = request.apikey
-                    if request.model_name is not None:
-                        new_config["model_name"] = request.model_name
-                    if request.name is not None:
-                        new_config["name"] = request.name
-                    
-                    # 将新配置追加到全局 api_config 列表
-                    api_config.append(new_config)
-                    with open("api_config.json", "w", encoding="utf-8") as f:
-                        json.dump(api_config, f, ensure_ascii=False, indent=2)
-                else:
-                    raise HTTPException(status_code=400, detail="Duplicate name!")
+                # Create new configuration object, only including non-empty fields
+                new_config = {}
+                if request.provider is not None:
+                    new_config["provider"] = request.provider
+                if request.apiurl is not None:
+                    new_config["apiurl"] = request.apiurl     
+                if request.apikey is not None:
+                    new_config["apikey"] = request.apikey
+                if request.model_name is not None:
+                    new_config["model_name"] = request.model_name
+                if request.name is not None:
+                    new_config["name"] = request.name
+                
+                # Append new configuration to the global api_config list
+                api_config.append(new_config)
+                with open("api_config.json", "w", encoding="utf-8") as f:
+                    json.dump(api_config, f, ensure_ascii=False, indent=2)
+                return APIConfigResponse(success=True, message="Configuration added successfully")
         elif request.action == "delete":
             if not request.name:
                 raise HTTPException(status_code=400, detail="name is required for delete action")
@@ -260,18 +264,19 @@ async def config_endpoint(request: API_action):
                     api_config = [item for item in api_config if item["name"] != request.name]
                     with open("api_config.json", "w", encoding="utf-8") as f:
                         json.dump(api_config, f, ensure_ascii=False, indent=2)
+                    return APIConfigResponse(success=True, message="Configuration deleted successfully")
                 else:
                     raise HTTPException(status_code=400, detail="name not found!")
         elif request.action == "query":
             cleaned_config = [{k: v for k, v in item.items() if k != "apikey"} for item in api_config]
-            return cleaned_config
+            return APIConfigResponse(success=True, message="Query successful", data=cleaned_config)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"error: {str(e)}")
 
 @app.post("/router", response_model=ClassifyResponse)
 async def classify_text_endpoint(request: ClassifyRequest):
     """
-    对输入文本进行分类
+    Classifies the input text
     """
     try:
         label, confidence = classify_text(request.text, requires_reasoning)
@@ -282,19 +287,25 @@ async def classify_text_endpoint(request: ClassifyRequest):
 @app.post("/ai", response_model=AIResponseResponse)
 async def ai_response_endpoint(request: AIResponseRequest):
     """
-    对输入文本进行AI响应
+    Provides AI response for the input text
     """
+
+    # Google Gemini model
     try:
         from google import genai
         from google.genai import types
         
+        apikey = next((item["apikey"] for item in api_config if item.get("name") == request.name), None)
+        model_name = next((item["model_name"] for item in api_config if item.get("name") == request.name), None)
+        if apikey is None:
+            raise HTTPException(status_code=404, detail=f"Model configuration named '{request.name}' not found")
 
         client = genai.Client(
-            api_key=request.apikey
+            api_key=apikey
         )
 
         response = client.models.generate_content(
-        model=request.model,
+        model=model_name,
         contents=request.query,
         config=types.GenerateContentConfig(
             thinking_config=types.ThinkingConfig(
@@ -304,33 +315,33 @@ async def ai_response_endpoint(request: AIResponseRequest):
         )
         )
 
-        # 初始化思考内容和最终回复内容为空字符串
+        # Initialize think_text and text as empty strings
         think_text = ""
         text = ""
-        # 如果响应中包含候选结果，则遍历处理
+        # If response contains candidates, iterate and process
         if response.candidates:
             for candidate in response.candidates:
-                # 安全获取候选结果中的 parts，避免空指针
+                # Safely get parts from candidate content, avoid null pointer
                 parts = candidate.content.parts if candidate.content and candidate.content.parts else []
                 for part in parts:
-                    # 判断当前 part 是否为思考内容（thought 字段存在且为真）
+                    # Check if current part is thought content (thought field exists and is true)
                     if hasattr(part, "thought") and part.thought:
-                        # 如果是思考内容，提取其 text 字段作为思考文本
+                        # If it's thought content, extract its text field as think_text
                         think_text = part.text if hasattr(part, "text") else ""
                     else:
-                        # 否则视为最终回复内容，提取其 text 字段
+                        # Otherwise, treat as final response content, extract its text field
                         text = part.text if hasattr(part, "text") else ""
-        # 构造并返回响应对象，确保字段不为 None
+        # Construct and return response object, ensuring fields are not None
         return AIResponseResponse(think_text=think_text or "", text=text or "")
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"error: {str(e)}")
 
 
 
-# 挂载静态文件服务，将index.html作为首页
-# 注意：必须在所有API路由定义之后挂载静态文件服务
+# Mount static file service, using index.html as the homepage
+# Note: Static file service must be mounted after all API route definitions
 app.mount("/", StaticFiles(directory=".", html=True), name="static")
 
-# 如果直接运行此脚本，则启动服务器
+# If this script is run directly, start the server
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8000)
